@@ -9,83 +9,109 @@
     This function allows to combine results from the different 
     set-based and network-based enrichment analysis methods.
     This includes the computation of average gene set ranks 
-    across methods and of combined gene set p-values. 
+    across methods. 
 }
 \usage{
-    comb.ea.results(res.list, pcomb.meth=c("fisher","stouffer"), out.file=NULL)
+    comb.ea.results( res.list, 
+        rank.col=config.ebrowser("GSP.COL"),
+        decreasing=FALSE,
+        rank.fun = c("comp.ranks", "rel.ranks", "abs.ranks"), 
+        comb.fun = c("mean", "median", "min", "max", "sum") )
 }
 \arguments{
     \item{res.list}{
-        A list of enrichment analysis result objects as returned 
-        by the functions \sQuote{sbea} and \sQuote{nbea}.
+        A list of enrichment analysis result lists (as returned 
+        by the functions \code{\link{sbea}} and \code{\link{nbea}}).
+    }
+    \item{rank.col}{
+        Rank column.
+        Column name of the enrichment analysis result table that should 
+        be used to rank the gene sets.
+        Defaults to the gene set p-value column, i.e. gene sets are ranked
+        according to gene set significance. 
+    }
+    \item{decreasing}{
+        Logical.
+        Should smaller (decreasing=FALSE, default) or larger (decreasing=TRUE) 
+        values in rank.col be ranked better?
+        In case of gene set p-values the smaller the better, in case of gene set
+        scores the larger the better.
+    }
+    \item{rank.fun}{
+        Ranking function.
+        Used to rank gene sets according to the result table of individual
+        enrichment methods (as returned from the \code{\link{gs.ranking}} 
+        function). This is typically done according to gene set p-values,
+        but can also take into account gene set scores/statistics, especially
+        in case of gene sets with equal p-value.
+        Can be either one of the predefined functions ('comp.ranks', 'rel.ranks', 
+        'abs.ranks') or a user-defined function.
+        Defaults to 'comp.ranks', i.e. competitive (percentile) ranks are computed
+        by calculating for each gene set the percentage of gene sets with a 
+        p-value as small or smaller.
+        Alternatively, 'rel.ranks', i.e. relative ranks are computed in 2 steps:
+        \enumerate{
+            \item Ranks are assigned according to distinct gene set p-value
+                *categories*, i.e. gene sets with equal p-value obtain the *same*
+                rank. Thus, the gene sets with lowest p-value obtain rank 1, 
+                and so on.
+            \item As opposed to absolute ranks (rank.fun = 'abs.ranks'), which
+                are returned from step 1, relative ranks are then computed by 
+                dividing the absolute rank by number of distinct p-value 
+                categories and multiplying with 100 (= percentile rank).
+        }
+    }
+    \item{comb.fun}{
+        Rank combination function.
+        Used to combine gene set ranks across methods.
+        Can be either one of the predefined functions (mean, median,
+        max, min, sum) or a user-defined function.
+        Defaults to 'sum', i.e. the rank sum across methods is
+        computed.  
     } 
-    \item{pcomb.meth}{
-        P-value combination method.
-        See details. Defaults to \sQuote{fisher}.
-    }
-    \item{out.file}{
-        Optional output file the combined ranking is written to.
-    }
 }
 \value{
-    if(is.null(out.file)): an enrichment analysis result object 
-    that can be detailedly explored by calling 'ea.browse' and from 
-    which a flat gene set ranking can be extracted by calling 'gs.ranking'.
-    If 'out.file' is given, the ranking is written to the specified file. 
-}
-\details{
-    Fisher's method (pcomb.meth="fisher") combines the statistical significance 
-    from several independent tests.
-    Stouffer's method (pcomb.meth="stouffer") allows the combination from 
-    dependent tests. See Kim et al., 2013.
-}
-\references{
-    Kim et al. (2013)
-    Stouffer's test in a large scale simultaneous hypothesis testing
-    PLoS One, 8(5), e63290.
+    An enrichment analysis result list 
+    that can be detailedly explored by calling \code{\link{ea.browse}} and from 
+    which a flat gene set ranking can be extracted by calling \code{\link{gs.ranking}}.
 }
 \seealso{
-    \code{\link{sbea}}, \code{\link{nbea}}, \code{\link{ea.browse}}}
+    \code{\link{sbea}}, \code{\link{nbea}}, \code{\link{ea.browse}}
+}
 \author{
     Ludwig Geistlinger <Ludwig.Geistlinger@bio.ifi.lmu.de>
 }
 \examples{
-    # (1) reading the expression data from file
-    exprs.file <- system.file("extdata/ALL_exprs.tab", package="EnrichmentBrowser")
-    pdat.file <- system.file("extdata/ALL_pData.tab", package="EnrichmentBrowser")
-    fdat.file <- system.file("extdata/ALL_fData.tab", package="EnrichmentBrowser")
-    probe.eset <- read.eset(exprs.file, pdat.file, fdat.file)
 
-    # (2) summarizing probe expression on gene level
-    gene.eset <- probe.2.gene.eset(probe.eset) 
+    # (1) expression set: 
+    # simulated expression values of 100 genes
+    # in two sample groups of 6 samples each
+    eset <- make.example.data(what="eset")
+    eset <- de.ana(eset)
 
-    # (3a) getting all human KEGG gene sets
-    # hsa.gs <- get.kegg.genesets("hsa")
-    gs.file <- system.file("extdata/hsa_kegg_gs.gmt", package="EnrichmentBrowser")
-    hsa.gs <- parse.genesets.from.GMT(gs.file)
+    # (2) gene sets:
+    # draw 10 gene sets with 15-25 genes
+    gs <- make.example.data(what="gs", gnames=featureNames(eset))
 
-    # (3b) compiling gene regulatory network from KEGG pathways
-    # hsa.grn <- compile.grn.from.kegg("hsa")
-    pwys <- system.file("extdata/hsa_kegg_pwys.zip", package="EnrichmentBrowser")
-    hsa.grn <- compile.grn.from.kegg(pwys)
-
-    # (4) performing the set-based and network-based enrichment analysis
-    # Note: reduced permutations for demonstration
-    #       recommended default is 1000 permutations
-    # sbea.res <- sbea(method="gsea", eset=gene.eset, gs=hsa.gs)
-    # nbea.res <- nbea(method="ggea", eset=gene.eset, gs=hsa.gs, grn=hsa.grn)
-    sbea.res <- sbea(method="ora", eset=gene.eset, gs=hsa.gs, perm=0)
-    nbea.res <- nbea(method="ggea", 
-                        eset=gene.eset, gs=hsa.gs, grn=hsa.grn, perm=100)
+    # (3) make artificial enrichment analysis results:
+    # 2 ea methods with 5 significantly enriched gene sets each 
+    ora.res <- make.example.data(what="ea.res", method="ora", eset=eset, gs=gs) 
+    gsea.res <- make.example.data(what="ea.res", method="gsea", eset=eset, gs=gs)
     
-    # (5) combining the results
-    res.list <- list(sbea.res, nbea.res)
+    # (4) combining the results
+    res.list <- list(ora.res, gsea.res)
     comb.res <- comb.ea.results(res.list)
 
-    # (6) result visualization and exploration
+    # (5) result visualization and exploration
     gs.ranking(comb.res)
-    \donttest{
-    ea.browse(comb.res)
-    }
+
+    # user-defined ranking and combination functions
+    # (a) dummy ranking, give 1:nrow(res.tbl)
+    dummy.rank <- function(res.tbl) seq_len(nrow(res.tbl))
+
+    # (b) weighted average for combining ranks
+    wavg <- function(r) mean(c(1,2) * r)
+
+    comb.res <- comb.ea.results(res.list, rank.fun=dummy.rank, comb.fun=wavg)
 }
 

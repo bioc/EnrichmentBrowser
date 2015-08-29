@@ -8,13 +8,13 @@
 }
 \description{
     This is the main function for the enrichment analysis of gene sets.
-    It implements and uses existing implementations of several frequently 
+    It implements and wraps existing implementations of several frequently 
     used state-of-art methods and allows a flexible inspection of 
     resulting gene set rankings. 
 }
 \usage{
-    sbea(method=c("ora", "safe", "gsea", "samgs"), eset, gs, 
-            alpha=0.05, perm=1000, out.file=NULL, browse=FALSE)
+    sbea( method = sbea.methods(), eset, gs, alpha = 0.05, 
+            perm = 1000, padj.method = "none", out.file = NULL, browse = FALSE )
 
     sbea.methods()
 }
@@ -25,14 +25,13 @@
         are supported:
         \sQuote{ora}, \sQuote{safe}, \sQuote{gsea}, and \sQuote{samgs}.
         See Details. For basic ora also set 'perm=0'. Default is \sQuote{ora}.
-        This can also be the name of a tailored function implementing set-based
-        enrichment. See Details. 
+        This can also be the name of a user-defined function implementing 
+        set-based enrichment. See Details. 
     } 
     \item{eset}{
-        Expression set. Either an object of class 'ExpressionSet' or an absolute
-        file path to an RData file containing the gene expression set. 
-        See 'read.eset' and 'probe.2.gene.eset' for required annotations 
-        in the pData and fData slot.
+        Expression set. An object of class \code{\linkS4class{ExpressionSet}}. 
+        See \code{\link{read.eset}} and \code{\link{probe.2.gene.eset}} for 
+        required annotations in the pData and fData slots.
     }
     \item{gs}{
         Gene sets.
@@ -44,8 +43,16 @@
     }
     \item{perm}{
         Number of permutations of the expression matrix to estimate the null 
-        distribution. Defaults to 1000. For basic ora set 'perm=0'.
+        distribution. Defaults to 1000. For basic ora set 'perm=0'. 
+        *New*: using method="gsea" and 'perm=0' invokes the permutation
+        approximation from the npGSEA package.
     }  
+    \item{padj.method}{
+        Method for adjusting nominal gene set p-values to multiple testing.
+        For available methods see the man page of the 
+        stats function \code{\link{p.adjust}}.
+        Defaults to'none', i.e. leaves the nominal gene set p-values unadjusted.
+    }
     \item{out.file}{
         Optional output file the gene set ranking will be written to.
     }
@@ -58,21 +65,26 @@
     sbea.methods: a character vector of currently supported methods;
 
     sbea: if(is.null(out.file)): an enrichment analysis result object 
-    that can be detailedly explored by calling 'ea.browse' and from 
-    which a flat gene set ranking can be extracted by calling 'gs.ranking'.
+    that can be detailedly explored by calling \code{\link{ea.browse}} and from 
+    which a flat gene set ranking can be extracted by calling \code{\link{gs.ranking}}.
     If 'out.file' is given, the ranking is written to the specified file. 
 }
 \details{
     'ora': overrepresentation analysis, simple and frequently used test based 
     on the hypergeometric distribution (see Goeman and Buhlmann, 2007, for a 
-    critical review). 'safe': significance analysis of function and expression,
+    critical review). 
+
+    'safe': significance analysis of function and expression,
     generalization of ORA, includes other test statistics, e.g. Wilcoxon's rank
     sum, and allows to estimate the significance of gene sets by sample 
     permutation; implemented in the safe package (Barry et al., 2005).
+    
     'gsea': gene set enrichment analysis, frequently used and widely accepted, 
     uses a Kolmogorov-Smirnov statistic to test whether the ranks of the 
     p-values of genes in a gene set resemble a uniform distribution 
-    (Subramanian et al., 2005). 'samgs': significance analysis of microarrays 
+    (Subramanian et al., 2005). 
+
+    'samgs': significance analysis of microarrays 
     on gene sets, extends the SAM method for single genes to gene set analysis
     (Dinu et al., 2007).
 
@@ -120,40 +132,38 @@
     # currently supported methods
     sbea.methods()
 
-    # (1) reading the expression data from file
-    exprs.file <- system.file("extdata/ALL_exprs.tab", package="EnrichmentBrowser")
-    pdat.file <- system.file("extdata/ALL_pData.tab", package="EnrichmentBrowser")
-    fdat.file <- system.file("extdata/ALL_fData.tab", package="EnrichmentBrowser")
-    probe.eset <- read.eset(exprs.file, pdat.file, fdat.file)
+    # (1) expression data: 
+    # simulated expression values of 100 genes
+    # in two sample groups of 6 samples each
+    eset <- make.example.data(what="eset")
+    eset <- de.ana(eset)
 
-    # (2) summarizing probe expression on gene level
-    gene.eset <- probe.2.gene.eset(probe.eset) 
+    # (2) gene sets:
+    # draw 10 gene sets with 15-25 genes
+    gs <- make.example.data(what="gs", gnames=featureNames(eset))
 
-    # (3) getting all human KEGG gene sets
-    # hsa.gs <- get.kegg.genesets("hsa")
-    gs.file <- system.file("extdata/hsa_kegg_gs.gmt", package="EnrichmentBrowser")
-    hsa.gs <- parse.genesets.from.GMT(gs.file)
+    # (3) make 2 artificially enriched sets:
+    sig.genes <- featureNames(eset)[fData(eset)$ADJ.PVAL < 0.1]
+    gs[[1]] <- sample(sig.genes, length(gs[[1]])) 
+    gs[[2]] <- sample(sig.genes, length(gs[[2]]))   
 
     # (4) performing the enrichment analysis
-    ea.res <- sbea(method="ora", eset=gene.eset, gs=hsa.gs, perm=0)
+    ea.res <- sbea(method="ora", eset=eset, gs=gs, perm=0)
 
     # (5) result visualization and exploration
     gs.ranking(ea.res)
-    \donttest{
-    ea.browse(ea.res)
-    }
 
     # using your own tailored function as enrichment method
     dummy.sbea <- function(eset, gs, alpha, perm)
     {
-        sig.ps <- sample(seq(0,0.05, length=1000),5)
-        insig.ps <- sample(seq(0.1,1, length=1000), length(gs)-5)
-        ps <- sample(c(sig.ps, insig.ps), length(gs))
+        sig.ps <- sample(seq(0, 0.05, length=1000), 5)
+        nsig.ps <- sample(seq(0.1, 1, length=1000), length(gs)-5)
+        ps <- sample(c(sig.ps, nsig.ps), length(gs))
         names(ps) <- names(gs)
         return(ps)
     }
 
-    sbea.res2 <- sbea(method="dummy.sbea", eset=gene.eset, gs=hsa.gs)
-    gs.ranking(sbea.res2) 
+    ea.res2 <- sbea(method=dummy.sbea, eset=eset, gs=gs)
+    gs.ranking(ea.res2) 
 }
 

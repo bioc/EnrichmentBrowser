@@ -3,59 +3,70 @@
 # author: Ludwig Geistlinger
 # date: 06 Dec 2010
 #
-# Set-based Enrichment Analysis (SEA)
-#
-# Update, 06 May 2014: extension of file-based SEA 
-#           to invokement within R
+# Set-based Enrichment Analysis (SBEA)
 #
 ############################################################
 
 # A INPUT FASSADE - wrapping & delegation
-sbea.methods <- function() SBEA.METHODS
+sbea.methods <- function() c("ora", "safe", "gsea", "samgs")
 
 sbea <- function(   
-    method=c("ora", "safe", "gsea", "samgs"), 
+    method=sbea.methods(), 
     eset, 
     gs, 
     alpha=0.05, 
     perm=1000, 
+    padj.method="none",
     out.file=NULL,
     browse=FALSE)
 {   
-    if(class(eset) == "character") eset <- get(load(eset))
-    if(class(method) == "character")
+    GS.MIN.SIZE <- config.ebrowser("GS.MIN.SIZE")
+    GS.MAX.SIZE <- config.ebrowser("GS.MAX.SIZE")
+    GSP.COL <- config.ebrowser("GSP.COL")
+
+    # restrict eset and gs to intersecting genes
+    igenes <- intersect(featureNames(eset), unique(unlist(gs)))
+    eset <- eset[igenes,]
+    gs <- sapply(gs, function(s) s[s %in% igenes]) 
+    lens <- sapply(gs, length)
+    gs <- gs[lens >= GS.MIN.SIZE & lens <= GS.MAX.SIZE]
+
+    if(is.character(method))
     { 
-        method <- method[1]
-        if(length(find(method))) gs.ps <- do.call(method, 
-            list(eset=eset, gs=gs, alpha=alpha, perm=perm))
-        else if(!(method %in% sbea.methods())) 
-            stop(paste("\'method\' must be one out of {", 
-                paste(sbea.methods(), collapse=", "), "}"))
+        method <- match.arg(method)
+        data.type <- experimentData(eset)@other$dataType
+        if(is.null(data.type)) data.type <- auto.detect.data.type(exprs(eset))
+ 
+        #if(length(find(method))) gs.ps <- do.call(method, 
+        #    list(eset=eset, gs=gs, alpha=alpha, perm=perm))
+        #else 
+        #if(!(method %in% sbea.methods())) 
+        #    stop(paste("\'method\' must be one out of {", 
+        #        paste(sbea.methods(), collapse=", "), "}"))
+        # else 
         # gsea
-        else if(method == "gsea") 
-            gs.ps <- gsea(eset, gs, perm=perm, alpha=alpha) 
+        if(data.type != "rseq" & method == "gsea") gs.ps <- gsea(eset, gs, perm)
         else
         {
-            cmat <- gmt.2.cmat(gs, featureNames(eset), 
-                        min.size=GS.MIN.SIZE, max.size=GS.MAX.SIZE)
+            cmat <- gmt.2.cmat(gs, featureNames(eset), GS.MIN.SIZE, GS.MAX.SIZE)
             if(nrow(cmat) < nrow(eset)) eset <- eset[rownames(cmat),] 
-            
-            # ora
-            if(method == "ora") 
-                gs.ps <- ora(mode=1, eset=eset, 
-                    cmat=cmat, perm=perm, alpha=alpha)
-            # safe
-            else if(method == "safe") 
-                gs.ps <- ora(eset=eset, cmat=cmat, perm=perm, alpha=alpha) 
+           
+            # hypergeom. ora
+            if(method == "ora" & perm==0) gs.ps <- ora(1, eset, cmat, perm, alpha)
+            # rseq 
+            else if(data.type == "rseq") gs.ps <- rseq.sbea(method, eset, cmat, perm, alpha)
+            # resampl ora
+            else if(method == "ora") gs.ps <- ora(1, eset, cmat, perm, alpha)
+            #safe
+            else if(method == "safe") gs.ps <- ora(2, eset, cmat, perm, alpha)
             # samgs
             else if(method == "samgs")
             {
-                if(is.null(out.file)) 
-                    out.dir <- file.path(system.file(
-                        package="EnrichmentBrowser"), "results")
+                if(is.null(out.file)) out.dir <- config.ebrowser("OUTDIR.DEFAULT")
                 else out.dir <- sub("\\.[a-z]+$","_files", out.file)
                 if(!file.exists(out.dir)) dir.create(out.dir)
                 samt.file <- file.path(out.dir, "samt.RData")
+                GRP.COL <- config.ebrowser("GRP.COL")
                 gs.ps <- SAMGS(GS=as.data.frame(cmat), DATA=exprs(eset), 
                         cl=as.factor(as.integer(eset[[GRP.COL]]) + 1), 
                         nbPermutations=perm, 
@@ -63,16 +74,22 @@ sbea <- function(
             }
         }
     }
-    else if(class(method) == "function") 
+    else if(is.function(method)) 
         gs.ps <- method(eset=eset, gs=gs, alpha=alpha, perm=perm)
     else stop(paste(method, "is not a valid method for sbea"))
 
-    gs.ps <- sort(gs.ps)
-    gs.ps <- signif(gs.ps, digits=3)
-    res.tbl <- cbind(names(gs.ps), gs.ps)
-    colnames(res.tbl) <- c("GENE.SET", "P.VALUE")
-    rownames(res.tbl) <- NULL
+    res.tbl <- data.frame(signif(gs.ps, digits=3))
+    sorting.df <- res.tbl[,ncol(res.tbl)]
+    if(ncol(res.tbl) > 1) 
+        sorting.df <- cbind(sorting.df, -res.tbl[,rev(seq_len(ncol(res.tbl)-1))])
+    else colnames(res.tbl)[1] <- GSP.COL 
+    res.tbl <- res.tbl[do.call(order, as.data.frame(sorting.df)), , drop=FALSE]
 
+    res.tbl[,GSP.COL] <- p.adjust(res.tbl[,GSP.COL], method=padj.method)
+
+    res.tbl <- DataFrame(rownames(res.tbl), res.tbl)
+    colnames(res.tbl)[1] <- config.ebrowser("GS.COL")
+    rownames(res.tbl) <- NULL
        
     if(!is.null(out.file))
     {
@@ -84,7 +101,7 @@ sbea <- function(
     { 
         res <- list(
             method=method, res.tbl=res.tbl,
-            nr.sigs=sum(gs.ps < alpha),
+            nr.sigs=sum(res.tbl[,GSP.COL] < alpha),
             eset=eset, gs=gs, alpha=alpha)
         if(browse) ea.browse(res)
         else return(res)
@@ -96,17 +113,17 @@ gs.ranking <- function(res, signif.only=TRUE)
     if(signif.only)
     {
         nr.sigs <- res$nr.sigs
-        if(nr.sigs) ranking <- res$res.tbl[seq_len(nr.sigs),,drop=FALSE]
+        if(nr.sigs) ranking <- res$res.tbl[seq_len(nr.sigs),]
         else return(NULL)
     }
     else ranking <- res$res.tbl
-    return(as.data.frame(ranking))
+    return(ranking)
 }
 
 # 0 HELPER
 gmt.2.cmat <- function(gs, features, min.size=0, max.size=Inf)
 {
-    if(class(gs) == "character") gs <- parse.genesets.from.GMT(gs)
+    if(is.character(gs)) gs <- parse.genesets.from.GMT(gs)
     # transform gs gmt to cmat
     cmat <- sapply(gs, function(x) features %in% x)
     rownames(cmat) <- features
@@ -129,6 +146,62 @@ gmt.2.cmat <- function(gs, features, min.size=0, max.size=Inf)
 # ENRICHMENT METHODS
 #
 ###
+# de.ana as local.stat for safe
+local.de.ana <- function (X.mat, y.vec, args.local)
+{
+    return(function(data, ...) 
+    {
+        stat <- de.ana(expr=data, grp=y.vec,
+            blk=args.local$blk,
+            de.method=args.local$de.method, 
+            stat.only=TRUE)
+        return(stat)
+    })
+}
+
+
+rseq.sbea <- function(method, eset, cmat, perm, alpha)
+{
+    assign("local.de.ana", local.de.ana, envir=.GlobalEnv)
+    de.method <- grep(".STAT$", colnames(fData(eset)), value=TRUE)
+    de.method <- sub(".STAT$",  "", de.method)
+    
+    blk <- NULL
+    blk.col <- config.ebrowser("BLK.COL") 
+    if(blk.col %in% colnames(pData(eset))) blk <- pData(eset)[,blk.col]
+
+    args.local <- list(de.method=de.method, blk=blk)
+
+    args.global <- list(one.sided=FALSE)
+    if(method == "ora")
+    {
+        global <- "Fisher"
+        nr.sigs <- sum(fData(eset)[, config.ebrowser("ADJP.COL")] < alpha)
+        args.global <- list(one.sided=FALSE, genelist.length=nr.sigs)
+    }
+    else if(method == "safe") global <- "Wilcoxon" 
+    else if(method == "gsea") global <- "Kolmogorov"
+    else if(method == "samgs")
+    {
+        global <- "SAMGS"
+        assign("global.SAMGS", global.SAMGS, envir=.GlobalEnv)
+    }
+
+    y <- pData(eset)[,config.ebrowser("GRP.COL")]
+    gs.ps <- safe::safe(X.mat=exprs(eset), y.vec=y, C.mat=cmat,         
+        local="de.ana", args.local=args.local,
+        global=global, args.global=args.global, 
+        Pi.mat=perm, alpha=alpha, error="none")
+ 
+    res.tbl <- cbind(
+            gs.ps@global.stat, 
+            gs.ps@global.stat / colSums(cmat), 
+            gs.ps@global.pval)
+    
+    colnames(res.tbl) <- c("GLOB.STAT", "NGLOB.STAT", config.ebrowser("GSP.COL"))
+    
+    return(res.tbl)
+}
 
 # 1 HYPERGEOM ORA
 ora.hyperg <- function(ps, cmat, alpha=0.05)
@@ -152,9 +225,12 @@ ora.hyperg <- function(ps, cmat, alpha=0.05)
     # determine significance of overlap 
     # based on hypergeom. distribution
     gs.ps <- 1 - phyper(ovlp.sizes, gs.sizes, uni.sizes, nr.sigs)
-    names(gs.ps) <- colnames(cmat)
+    
+    res.tbl <- cbind(gs.sizes, ovlp.sizes, gs.ps)
+    colnames(res.tbl) <- c("NR.GENES", "NR.SIG.GENES", config.ebrowser("GSP.COL"))
+    rownames(res.tbl) <- colnames(cmat)
 
-    return(gs.ps)
+    return(res.tbl)
 }
 
 # 2 RESAMPL ORA
@@ -172,12 +248,15 @@ ora.hyperg <- function(ps, cmat, alpha=0.05)
 #
 ora <- function(mode=2, eset, cmat, perm=1000, alpha=0.05)
 {
+    GRP.COL <- config.ebrowser("GRP.COL")
+    ADJP.COL <- config.ebrowser("ADJP.COL")
+
     x <- exprs(eset)
-    y <- as.integer(pData(eset)[, GRP.COL]) 
+    y <- pData(eset)[, GRP.COL]
 
     # execute hypergeom ORA if no permutations
     ps <- fData(eset)[, ADJP.COL]
-    if(perm == 0) gs.ps <- ora.hyperg(ps=ps, cmat=cmat, alpha=alpha)
+    if(perm == 0) res.tbl <- ora.hyperg(ps=ps, cmat=cmat, alpha=alpha)
     # else do resampling using functionality of SAFE
     else{
         # resampl ORA
@@ -185,66 +264,59 @@ ora <- function(mode=2, eset, cmat, perm=1000, alpha=0.05)
             nr.sigs <- sum(fData(eset)[ , ADJP.COL] < alpha)
             args <- list(one.sided=FALSE, genelist.length=nr.sigs)
 
-            gs.ps <- safe(  X.mat=x, y.vec=y, 
-                    C.mat=cmat, Pi.mat=perm, alpha=alpha, 
-                    global="Fisher", args.global=args)
+            gs.ps <- safe::safe(X.mat=x, y.vec=y, global="Fisher", C.mat=cmat, 
+                 Pi.mat=perm, alpha=alpha, error="none", args.global=args)
         } 
         # SAFE default                  
-        else gs.ps <- safe(X.mat=x, y.vec=y, 
-            C.mat=cmat, Pi.mat=perm, alpha=alpha)
-        gs.ps <- gs.ps@global.pval
+        else gs.ps <- safe::safe(X.mat=x, y.vec=y, 
+            C.mat=cmat, Pi.mat=perm, alpha=alpha, error="none")
+        res.tbl <- cbind(
+            gs.ps@global.stat, 
+            gs.ps@global.stat / colSums(cmat), 
+            gs.ps@global.pval)
+        colnames(res.tbl) <- c("GLOB.STAT", "NGLOB.STAT", config.ebrowser("GSP.COL"))
     }
-    return(gs.ps)
+    return(res.tbl)
 }
 
 # 4 GSEA
 gsea <- function(
     eset, 
     gs.gmt, 
-    doc.string="GSEA.Analysis", 
-    alpha=0.05, 
     perm=1000, 
     out.file=NULL)
 {        
+    GRP.COL <- config.ebrowser("GRP.COL")
+    
+    # npGSEA
+    if(perm==0)
+    {
+        gsc <- gs.list.2.gs.coll(gs.gmt)
+        res <- npGSEA::npGSEA(x=exprs(eset), y=eset[[GRP.COL]], set=gsc)
+        ps <- sapply(res, npGSEA::pTwoSided)
+        names(ps) <- names(gs.gmt)
+        return(ps)
+    }
+
     # build class list
     cls <- list()
     cls$phen <- levels(as.factor(eset[[GRP.COL]]))
     cls$class.v <- ifelse(eset[[GRP.COL]] == cls$phen[1], 0, 1)
 
     if(is.null(out.file)) 
-        out.dir <- file.path(system.file(package="EnrichmentBrowser"), "results")
+        out.dir <- config.ebrowser("OUTDIR.DEFAULT") 
     else out.dir <- sub("\\.[a-z]+$", "_files", out.file)
     if(!file.exists(out.dir)) dir.create(out.dir)
-
-    if(class(gs.gmt) != "character") 
-    {
-        gmt.out <- file.path(out.dir, paste(doc.string, "gs.gmt", sep="_"))
-        write.gmt(gs.gmt, gmt.file=gmt.out)
-        gs.gmt <- gmt.out
-    }
-    
+        
     # run GSEA
-    GSEA(input.ds = as.data.frame(exprs(eset)), 
-        input.cls = cls,
-        gs.db = gs.gmt, 
-        output.directory = file.path(out.dir, ""),
-        doc.string            = doc.string,
-        nperm                 = perm,
-        fdr.q.val.threshold   = -1,
-        topgs                 = NROW.TOP.TABLE,
-        gs.size.threshold.min = GS.MIN.SIZE,
-        gs.size.threshold.max = GS.MAX.SIZE)
+    res <- GSEA(input.ds=as.data.frame(exprs(eset)), 
+        input.cls=cls, gs.db=gs.gmt, output.directory=out.dir, nperm=perm)
       
-    res.file <- file.path(out.dir, 
-        paste(doc.string, ".SUMMARY.RESULTS.REPORT.1.txt", sep=""))
-    res <- as.matrix(read.delim(res.file))
-    gs.ps <- as.numeric(res[,6])
-    names(gs.ps) <- res[,1]
+    gs.ps <- as.matrix(res[,3:5])
+    rownames(gs.ps) <- res[,1]
 
-    tmp.files <- list.files(out.dir, 
-        pattern=paste("^", doc.string, sep=""), full.names=TRUE)
-    invisible(file.remove(tmp.files))
-    
     return(gs.ps)
 }
+
+
 

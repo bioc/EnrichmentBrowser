@@ -7,13 +7,13 @@
 }
 \description{
     This is the main function for network-based enrichment analysis.
-    It implements and uses existing implementations of several frequently 
+    It implements and wraps existing implementations of several frequently 
     used state-of-art methods and allows a flexible inspection of 
     resulting gene set rankings. 
 }
 \usage{
-    nbea(method=c("ggea", "nea", "spia"), eset, gs, grn, 
-                    alpha=0.05, perm=1000, out.file=NULL, browse=FALSE, ...)
+    nbea( method = nbea.methods(), eset, gs, grn, alpha = 0.05, 
+          perm = 1000, padj.method = "none", out.file = NULL, browse = FALSE, ... )
 
     nbea.methods()
 }
@@ -22,15 +22,15 @@
         Network-based enrichment analysis method.
         Currently, the following network-based enrichment analysis methods 
         are supported:
-        \sQuote{ggea}, \sQuote{nea}, \sQuote{spia}.
+        \sQuote{ggea}, \sQuote{nea}, \sQuote{spia}, \sQuote{pathnet}.
         See Details. Default is 'ggea'.
-        This can also be the name of a tailored function implementing 
+        This can also be the name of a user-defined function implementing 
         network-based enrichment. See Details. 
     } 
     \item{eset}{
-        Expression set. Either an object of class 'ExpressionSet' or an 
-        absolute file path to an RData file containing the gene expression set. 
-        See 'read.eset' and 'probe.2.gene.eset'
+        Expression set. 
+        An object of class \code{\linkS4class{ExpressionSet}}.
+        See \code{\link{read.eset}} and \code{\link{probe.2.gene.eset}}
         for required annotations in the pData and fData slot.
     }
     \item{gs}{
@@ -51,9 +51,15 @@
     \item{perm}{
         Number of permutations of the expression matrix to estimate the 
         null distribution. Defaults to 1000. If using method=\sQuote{ggea},
-        it is possible to set perm < 1 to use a fast approximation of
+        it is possible to set 'perm=0' to use a fast approximation of
         gene set significance to avoid permutation testing. See Details.
-    }  
+    } 
+    \item{padj.method}{
+        Method for adjusting nominal gene set p-values to multiple testing.
+        For available methods see the man of page the of the 
+        stats function \code{\link{p.adjust}}.
+        Defaults to 'none', i.e. leaves the nominal gene set p-values unadjusted.
+    } 
     \item{out.file}{
         Optional output file the gene set ranking will be written to.
     }
@@ -66,7 +72,11 @@
         This includes currently for GGEA:
         \itemize{
         \item beta: Log2 fold change significance level. Defaults to 1 (2-fold).
-        \item cons.thresh: consistency threshold. Defaults to -1.
+        \item cons.thresh: edge consistency threshold between -1 and 1. #
+            Defaults to 0.3, i.e. only edges of the GRN with consistency >= 0.3 
+            are included in the analysis. Evaluation on real datasets has shown
+            that this works best to distinguish relevant gene sets. 
+            Use consistency of -1 to include all edges.
         \item gs.edges: Decides which edges of the grn are considered for a
                 gene set under investigation. Should be one out of c('&', '|'), 
                 denoting logical AND and OR. respectively. Accordingly, this 
@@ -79,8 +89,8 @@
     nbea.methods: a character vector of currently supported methods;
 
     nbea: if(is.null(out.file)): an enrichment analysis result object 
-    that can be detailedly explored by calling 'ea.browse' and from 
-    which a flat gene set ranking can be extracted by calling 'gs.ranking'.
+    that can be detailedly explored by calling \code{\link{ea.browse}} and from 
+    which a flat gene set ranking can be extracted by calling \code{\link{gs.ranking}}.
     If 'out.file' is given, the ranking is written to the specified file. 
 }
 \details{
@@ -100,6 +110,9 @@
     'spia': signaling pathway impact analysis, implemented in Bioconductor's 
     SPIA package.
 
+    'pathnet': pathway analysis using network information, implemented in 
+    Bioconductor's PathNet package.
+
     It is also possible to use additional network-based enrichment methods.
     This requires to implement a function that takes 'eset', 'gs', 'grn', 
     'alpha', and 'perm' as arguments and returns a numeric matrix 'res.tbl' 
@@ -116,7 +129,7 @@
 }
 \seealso{
     Input:    
-    \code{\link{read.eset}}, \code{\link{probe.2.gene.eset}}
+    \code{\link{read.eset}}, \code{\link{probe.2.gene.eset}}, 
     \code{\link{get.kegg.genesets}} to retrieve gene set definitions from KEGG.
     \code{\link{compile.grn.from.kegg}} to construct a GRN from KEGG pathways.
   
@@ -129,6 +142,7 @@
     \code{\link{comb.ea.results}} to combine results from different methods.
     \code{\link{spia}} for more information on signaling pathway impact analysis.
     \code{\link{nea}} for more information on network enrichment analysis.    
+    \code{\link{PathNet}} for more information on pathway analysis using network information.
 }
 \author{
     Ludwig Geistlinger <Ludwig.Geistlinger@bio.ifi.lmu.de>
@@ -137,37 +151,29 @@
     # currently supported methods
     nbea.methods()
 
-    # (1) reading the expression data from file
-    exprs.file <- system.file("extdata/ALL_exprs.tab", package="EnrichmentBrowser")
-    pdat.file <- system.file("extdata/ALL_pData.tab", package="EnrichmentBrowser")
-    fdat.file <- system.file("extdata/ALL_fData.tab", package="EnrichmentBrowser")
-    probe.eset <- read.eset(exprs.file, pdat.file, fdat.file)
+    # (1) expression data: 
+    # simulated expression values of 100 genes
+    # in two sample groups of 6 samples each
+    eset <- make.example.data(what="eset")
+    eset <- de.ana(eset)
 
-    # (2) summarizing probe expression on gene level
-    gene.eset <- probe.2.gene.eset(probe.eset) 
+    # (2) gene sets:
+    # draw 10 gene sets with 15-25 genes
+    gs <- make.example.data(what="gs", gnames=featureNames(eset))
 
-    # (3a) getting all human KEGG gene sets
-    # hsa.gs <- get.kegg.genesets("hsa")
-    gs.file <- system.file("extdata/hsa_kegg_gs.gmt", package="EnrichmentBrowser")
-    hsa.gs <- parse.genesets.from.GMT(gs.file)
+    # (3) make 2 artificially enriched sets:
+    sig.genes <- featureNames(eset)[fData(eset)$ADJ.PVAL < 0.1]
+    gs[[1]] <- sample(sig.genes, length(gs[[1]])) 
+    gs[[2]] <- sample(sig.genes, length(gs[[2]]))   
+   
+    # (4) gene regulatory network 
+    grn <- make.example.data(what="grn", nodes=featureNames(eset))
+    
+    # (5) performing the enrichment analysis
+    ea.res <- nbea(method="ggea", eset=eset, gs=gs, grn=grn)
 
-    # (3b) compiling gene regulatory network from KEGG pathways
-    # hsa.grn <- compile.grn.from.kegg("hsa")
-    pwys <- system.file("extdata/hsa_kegg_pwys.zip", package="EnrichmentBrowser")
-    hsa.grn <- compile.grn.from.kegg(pwys)
-
-    # (4) performing the enrichment analysis
-    # Note: reduced permutations for demonstration
-    #       recommended default is 1000 permutations
-    # ea.res <- nbea(method="ggea", eset=gene.eset, gs=hsa.gs, grn=hsa.grn)
-    ea.res <- nbea(method="ggea", 
-                    eset=gene.eset, gs=hsa.gs, grn=hsa.grn, perm=100)
-
-    # (5) result visualization and exploration
-    gs.ranking(ea.res)
-    \donttest{
-    ea.browse(ea.res, graph.view=hsa.grn)
-    }
+    # (6) result visualization and exploration
+    gs.ranking(ea.res, signif.only=FALSE)
 
     # using your own tailored function as enrichment method
     dummy.nbea <- function(eset, gs, grn, alpha, perm)
@@ -182,8 +188,7 @@
         return(res.tbl[order(ps),])
     }
 
-    nbea.res2 <- nbea(method="dummy.nbea", 
-        eset=gene.eset, gs=hsa.gs, grn=hsa.grn)
-    gs.ranking(nbea.res2) 
+    ea.res2 <- nbea(method=dummy.nbea, eset=eset, gs=gs, grn=grn)
+    gs.ranking(ea.res2) 
 }
 
