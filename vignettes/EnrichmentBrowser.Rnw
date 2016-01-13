@@ -210,7 +210,6 @@ Both modes are implemented in the \Biocpkg{EDASeq} function \Rfunction{getGeneLe
 <<lgc, eval=FALSE>>=
 ids <- head(featureNames(air.eset))
 lgc <- EDASeq::getGeneLengthAndGCContent(ids, org="hsa", mode="biomart") 
-lgc
 @
 
 Using precomputed information, normalization within and between lanes can be carried out via
@@ -227,8 +226,8 @@ norm.air <- normalize(air.eset, within=TRUE)
 
 Differential expression analysis between sample groups can be performed using 
 the function \Rfunction{de.ana}.
-As a prerequisite, the phenotype data should contain for each patient a binary 
-group assignment.
+As a prerequisite, the phenotype data should contain a binary group assignment 
+for each patient.
 For the ALL dataset, this indicates whether the BCR-ABL gene fusion is 
 present (1) or not (0). 
 
@@ -291,7 +290,7 @@ This turns out to be the YES proto-oncogene 1
 For RNA-seq data, the \Rfunction{de.ana} function carries out a differential 
 expression analysis between the two groups either based on functionality from
 \Biocpkg{limma} (that includes the \Rfunction{voom} transformation), or 
-alternatively, from the popular \Biocpkg{edgeR} or \Biocpkg{DESeq2} package. 
+alternatively, the popular \Biocpkg{edgeR} or \Biocpkg{DESeq2} package. 
 Here, we use the analysis based on \Biocpkg{edgeR} for demonstration.
 
 <<DE-ana-airway>>=
@@ -568,7 +567,7 @@ There are cases where it is necessary to perform certain steps of the demonstrat
 enrichment analysis pipeline individually.
 However, it is often more convenient to run the complete standardized pipeline.
 This can be done using the all-in-one wrapper function \Rfunction{ebrowser}.
-For example, the result page displayed in Figure \ref{fig:combRes} can also by 
+For example, the result page displayed in Figure \ref{fig:combRes} can also be 
 produced from scratch via 
 
 <<all-in-one, eval=FALSE>>=
