@@ -20,17 +20,22 @@ sbea <- function(
     out.file=NULL,
     browse=FALSE)
 {   
+    # get configuration
     GS.MIN.SIZE <- config.ebrowser("GS.MIN.SIZE")
     GS.MAX.SIZE <- config.ebrowser("GS.MAX.SIZE")
     GSP.COL <- config.ebrowser("GSP.COL")
     FC.COL <-  config.ebrowser("FC.COL")
     ADJP.COL <-  config.ebrowser("ADJP.COL")
     
+    # dealing with NA's
     nr.na <- sum(is.na(fData(eset)[,FC.COL]))
     if(nr.na) eset <- eset[!is.na(fData(eset)[,FC.COL]),]
     nr.na <- sum(is.na(fData(eset)[,ADJP.COL]))
     if(nr.na) eset <- eset[!is.na(fData(eset)[,ADJP.COL]),]    
 
+    # getting gene sets
+    if(!is.list(gs)) gs <- parse.genesets.from.GMT(gs)
+    
     # restrict eset and gs to intersecting genes
     igenes <- intersect(featureNames(eset), unique(unlist(gs)))
     eset <- eset[igenes,]
@@ -231,7 +236,7 @@ ora.hyperg <- function(ps, cmat, alpha=0.05)
 
     # determine significance of overlap 
     # based on hypergeom. distribution
-    gs.ps <- 1 - phyper(ovlp.sizes, gs.sizes, uni.sizes, nr.sigs)
+    gs.ps <- phyper(ovlp.sizes-1, gs.sizes, uni.sizes, nr.sigs, lower.tail=FALSE)
     
     res.tbl <- cbind(gs.sizes, ovlp.sizes, gs.ps)
     colnames(res.tbl) <- c("NR.GENES", "NR.SIG.GENES", config.ebrowser("GSP.COL"))

@@ -10,7 +10,7 @@
 #
 ############################################################
 
-nbea.methods <- function() c("ggea", "nea",  "spia", "pathnet")
+nbea.methods <- function() c("ggea", "spia", "nea", "pathnet")
 
 nbea <- function(
     method=nbea.methods(), 
@@ -23,22 +23,38 @@ nbea <- function(
     out.file=NULL,
     browse=FALSE, ...)
 {
+    # get configuration
     GS.MIN.SIZE <- config.ebrowser("GS.MIN.SIZE")
     GS.MAX.SIZE <- config.ebrowser("GS.MAX.SIZE")
     GSP.COL <- config.ebrowser("GSP.COL")
     FC.COL <-  config.ebrowser("FC.COL")
     ADJP.COL <-  config.ebrowser("ADJP.COL")
     
+    # dealing with NA's
     eset <- eset[!is.na(fData(eset)[,FC.COL]), ]
     eset <- eset[!is.na(fData(eset)[,ADJP.COL]), ]
 
-    # restrict eset and gs to intersecting genes
-    igenes <- intersect(featureNames(eset), unique(unlist(gs)))
-    eset <- eset[igenes,]
-    gs <- sapply(gs, function(s) s[s%in% igenes]) 
+    # getting gene sets & grn
+    if(!is.list(gs)) gs <- parse.genesets.from.GMT(gs)
+    if(!is.matrix(grn)) grn <- read.grn(grn)
+
+    # restrict to relevant genes 
+    # in the intersection of eset, gs, and grn
+    gs.genes <- unique(unlist(gs))
+    grn.genes <- unique(c(grn[,1], grn[,2]))
+    eset.genes <- featureNames(eset)
+    rel.genes <- intersect(intersect(gs.genes, grn.genes), eset.genes)
+    eset <- eset[rel.genes,]
+    gs <- sapply(gs, function(s) s[s%in% rel.genes])
     lens <- sapply(gs, length)
     gs <- gs[lens >= GS.MIN.SIZE & lens <= GS.MAX.SIZE]
+    grn <- grn[grn[,1] %in% rel.genes & grn[,2] %in% rel.genes,] 
+    
+    # prune grn
+    grn <- rm.self.edges(grn)
+    grn <- rm.rev.edges(grn)
 
+    # execute ea
     if(class(method) == "character")
     {
         method <- match.arg(method)
@@ -90,6 +106,33 @@ nbea <- function(
     }
 }
 
+#
+# general helpers
+#
+rm.self.edges <- function(grn) grn[grn[,1] != grn[,2],]
+
+rm.rev.edges <- function(grn)
+{
+    n <- nrow(grn) 
+    ind <- rep(FALSE, n) 
+    ind <- sapply(seq_len(n-1),
+        function(i)
+        {
+            x <- grn[i,]
+            j <- i + 1
+            grid <- j:n
+            cond1 <- grn[grid,2] == x[1]
+            cond2 <- grn[grid,1] == x[2]
+            is.rev <- any(cond1 & cond2)
+            return(is.rev) 
+        })
+    ind <- c(ind, FALSE)
+    grn <- grn[!ind,]
+}
+    
+#
+# NEA
+#
 nea.wrapper <- function(eset, gs, grn, alpha=0.05, perm=100)
 {
     ADJP.COL <- config.ebrowser("ADJP.COL")
@@ -117,6 +160,9 @@ nea.wrapper <- function(eset, gs, grn, alpha=0.05, perm=100)
     return(res) 
 }
 
+#
+# SPIA
+#
 spia.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000, beta=1)
 {
     FC.COL <- config.ebrowser("FC.COL")
@@ -147,38 +193,6 @@ spia.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000, beta=1)
     res[,"STATUS"] <- ifelse(res[,"STATUS"] == "Activated", 1, -1)
     res <- as.matrix(res)
     message("Finished SPIA analysis")
-    return(res)
-}
-
-pathnet.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000)
-{
-    ADJP.COL <- config.ebrowser("ADJP.COL")
-    GSP.COL <- config.ebrowser("GSP.COL")
-
-    dir.evid <- -log(fData(eset)[,ADJP.COL], base=10)
-    dir.evid <- cbind(as.integer(featureNames(eset)), dir.evid)
-    colnames(dir.evid) <- c("Gene.ID", "Obs")
-    adjm <- grn2adjm(grn)
-    pwy.dat <- extr.pwy.dat(gs, grn)
-    
-    res <- PathNet::PathNet(
-            #Enrichment_Analysis = TRUE, 
-            #Contextual_Analysis = FALSE, 
-            DirectEvidence_info = dir.evid, 
-            Column_DirectEvidence = 2,
-            Adjacency = adjm, 
-            pathway = pwy.dat, 
-            n_perm = perm, 
-            threshold = alpha)#,
-            #use_sig_pathways  = FALSE)
-
-    res <- res$enrichment_results[, 
-        c("Name", "No_of_Genes", "Sig_Direct", "Sig_Combi", "p_PathNet")]
-    rownames(res) <- sapply(as.vector(res[,1]), 
-        function(s) grep(unlist(strsplit(s,"_"))[1], names(gs), value=TRUE))
-    res <- res[-1]    
-    colnames(res) <- c("NR.GENES", "NR.SIG.GENES", "NR.SIG.COMB.GENES", GSP.COL)
-    res <- as.matrix(res)
     return(res)
 }
 
@@ -239,6 +253,40 @@ make.spia.data <- function(gs, grn)
     return(spia.data)
 }
 
+#
+# Pathnet
+#
+pathnet.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000)
+{
+    ADJP.COL <- config.ebrowser("ADJP.COL")
+    GSP.COL <- config.ebrowser("GSP.COL")
+
+    dir.evid <- -log(fData(eset)[,ADJP.COL], base=10)
+    dir.evid <- cbind(as.integer(featureNames(eset)), dir.evid)
+    colnames(dir.evid) <- c("Gene.ID", "Obs")
+    adjm <- grn2adjm(grn)
+    pwy.dat <- extr.pwy.dat(gs, grn)
+    
+    res <- PathNet::PathNet(
+            #Enrichment_Analysis = TRUE, 
+            #Contextual_Analysis = FALSE, 
+            DirectEvidence_info = dir.evid, 
+            Column_DirectEvidence = 2,
+            Adjacency = adjm, 
+            pathway = pwy.dat, 
+            n_perm = perm, 
+            threshold = alpha)#,
+            #use_sig_pathways  = FALSE)
+
+    res <- res$enrichment_results[, 
+        c("Name", "No_of_Genes", "Sig_Direct", "Sig_Combi", "p_PathNet")]
+    rownames(res) <- sapply(as.vector(res[,1]), 
+        function(s) grep(unlist(strsplit(s,"_"))[1], names(gs), value=TRUE))
+    res <- res[-1]    
+    colnames(res) <- c("NR.GENES", "NR.SIG.GENES", "NR.SIG.COMB.GENES", GSP.COL)
+    res <- as.matrix(res)
+    return(res)
+}
 
 # pathnet helper: extract pathway data from gs and grn
 extr.pwy.dat <- function(gs, grn)
@@ -287,5 +335,3 @@ grn2adjm <- function(grn)
     rownames(adjm) <- nodes
     return(adjm)
 }
-
-

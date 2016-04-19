@@ -1,4 +1,7 @@
 # GGEA, 16 June 2014
+#
+# UPDATE: 08 March 2016
+#   - dealing with different kinds of networks
 
 ###
 #
@@ -19,14 +22,6 @@
 ggea <- function(eset, gs, grn, 
     alpha=0.05, beta=1, perm=1000, gs.edges=c("&", "|"), cons.thresh=0.2)
 {
-    # restrict to relevant genes 
-    # in the intersection of eset, gs, and grn
-    gs.genes <- unique(unlist(gs))
-    grn.genes <- unique(c(grn[,1], grn[,2]))
-    eset.genes <- featureNames(eset)
-    rel.genes <- intersect(intersect(gs.genes, grn.genes), eset.genes)
-    eset <- eset[rel.genes,]
-
     # map gs & grn to indices implied by fDat
     # due to performance issues, transforms character2integer
     # map gene.id -> index, e.g. "b0031" -> 10
@@ -84,7 +79,8 @@ ggea <- function(eset, gs, grn,
 score.grn <- function(fDat, grn, alpha, beta, cons.thresh)
 {
     de <- comp.de(fDat, alpha=alpha, beta=beta)
-    de.grn <- cbind(de[grn[,1]], de[grn[,2]], grn[,3])
+    de.grn <- cbind(de[grn[,1]], de[grn[,2]])
+    if(ncol(grn) > 2) de.grn <- cbind(de.grn, grn[,3])
 
     # compute consistency scores for grn
     grn.cons <- apply(de.grn, 1, is.consistent)
@@ -102,8 +98,10 @@ score.grn <- function(fDat, grn, alpha, beta, cons.thresh)
 
 read.grn <- function(grn.file)
 {
+    first <- readLines(grn.file, n=1)
+    nr.col <- length(unlist(strsplit(first, "\\s")))
     grn <- scan(grn.file, what="character", quiet=TRUE)
-    grn <- matrix(grn, nrow=length(grn)/3, ncol=3, byrow=TRUE)
+    grn <- matrix(grn, nrow=length(grn)/nr.col, ncol=nr.col, byrow=TRUE)
     return(unique(grn))
 }
 
@@ -119,11 +117,14 @@ transform.grn <- function(grn, fMap)
     tgs <- fMap[grn[,2]]
     not.na.tgs <- !is.na(tgs)
     not.na <- not.na.tfs & not.na.tgs
-    
-    # transform reg. type
-    types <- ifelse(grn[,3]=="+", 1, -1)
-    
-    grn.mapped <- cbind(tfs, tgs, types)
+        
+    grn.mapped <- cbind(tfs, tgs)
+    if(ncol(grn) > 2) 
+    {
+        # transform reg. type
+        types <- ifelse(grn[,3]=="+", 1, -1)
+        grn.mapped <- cbind(grn.mapped, types)
+    }
     grn.mapped <- unique(grn.mapped[not.na,])
     
     grn.mapped <- grn.mapped[do.call(order, as.data.frame(grn.mapped)),]
@@ -197,8 +198,8 @@ comp.de <- function(fDat, alpha, beta, use.fc=TRUE)
 is.consistent <- function(grn.rel)
 {
     act.cons <- mean(abs(grn.rel[1:2]))
+    if(length(grn.rel) == 2) return(act.cons)	
     if(sum(sign(grn.rel[1:2])) == 0) act.cons <- -act.cons
-    
     return( ifelse(grn.rel[3] == 1, act.cons, -act.cons) ) 
 }
 
