@@ -51,8 +51,8 @@ nbea <- function(
     grn <- grn[grn[,1] %in% rel.genes & grn[,2] %in% rel.genes,] 
     
     # prune grn
-    grn <- rm.self.edges(grn)
-    grn <- rm.rev.edges(grn)
+    grn <- .rm.self.edges(grn)
+    grn <- .rm.rev.edges(grn)
 
     # execute ea
     if(class(method) == "character")
@@ -65,10 +65,11 @@ nbea <- function(
         #    stop(paste("\'method\' must be one out of {", 
         #        paste(nbea.methods(), collapse=", "), "}"))
         #else 
-        if(method == "nea") res.tbl <- nea.wrapper(eset, gs, grn, alpha, perm)
-        else if(method == "spia") res.tbl <- spia.wrapper(eset, gs, grn, alpha, perm)
+        if(method == "nea") res.tbl <- .nea(eset, gs, grn, alpha, perm, ...)
+        else if(method == "spia") 
+            res.tbl <- .spia(eset, gs, grn, alpha, perm, ...)
         else if(method == "pathnet") 
-            res.tbl <- pathnet.wrapper(eset, gs, grn, alpha, perm)
+            res.tbl <- .pathnet(eset, gs, grn, alpha, perm)
         else res.tbl <- ggea(eset, gs, grn, alpha, perm=perm, ...)      
     }
     else if(class(method) == "function") 
@@ -109,9 +110,9 @@ nbea <- function(
 #
 # general helpers
 #
-rm.self.edges <- function(grn) grn[grn[,1] != grn[,2],]
+.rm.self.edges <- function(grn) grn[grn[,1] != grn[,2],]
 
-rm.rev.edges <- function(grn)
+.rm.rev.edges <- function(grn)
 {
     n <- nrow(grn) 
     ind <- rep(FALSE, n) 
@@ -133,19 +134,21 @@ rm.rev.edges <- function(grn)
 #
 # NEA
 #
-nea.wrapper <- function(eset, gs, grn, alpha=0.05, perm=100)
+.nea <- function(eset, gs, grn, 
+    alpha=0.05, perm=100, beta=1, sig.stat=c("p", "fc", "|", "&"))
 {
-    ADJP.COL <- config.ebrowser("ADJP.COL")
-    GSP.COL <- config.ebrowser("GSP.COL")
+    nea <- NULL
+    .isAvailable("neaGUI", type="software")
 
     #if(perm > 100) perm <- 100
-    ags <- featureNames(eset)[fData(eset)[,ADJP.COL] < alpha]
+    isig <- is.sig(fData(eset), alpha, beta, sig.stat)
+    ags <- featureNames(eset)[isig]
     grn <- unique(grn[,1:2])
     gs.genes <- unique(unlist(gs))
     grn <- grn[(grn[,1] %in% gs.genes) & (grn[,2] %in% gs.genes),]
     network <- apply(grn, 1, function(x) paste(x, collapse=" "))
     message("Computing NEA permutations, this may take a few minutes ...")
-    res <- neaGUI::nea(ags=ags, fgs=gs, network=network, nperm=perm)
+    res <- nea(ags=ags, fgs=gs, network=network, nperm=perm)
     res <- res$MainResult
     res <- res[, c("Number_of_Genes", 
         "Number_of_AGS_genes", "Number_links", "Z_score", "P_value")]
@@ -156,6 +159,7 @@ nea.wrapper <- function(eset, gs, grn, alpha=0.05, perm=100)
     colnames(res) <- gsub("_", ".", colnames(res))
     colnames(res) <- toupper(colnames(res))
     res <- as.matrix(res)
+    GSP.COL <- config.ebrowser("GSP.COL")
     res <- res[order(res[,GSP.COL]),]
     return(res) 
 }
@@ -163,13 +167,14 @@ nea.wrapper <- function(eset, gs, grn, alpha=0.05, perm=100)
 #
 # SPIA
 #
-spia.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000, beta=1)
+.spia <- function(eset, gs, grn, 
+    alpha=0.05, perm=1000, beta=1, sig.stat=c("p", "fc", "|", "&")) 
 {
     FC.COL <- config.ebrowser("FC.COL")
     ADJP.COL <- config.ebrowser("ADJP.COL")
     GSP.COL <- config.ebrowser("GSP.COL")
 
-    de.genes <- fData(eset)[,ADJP.COL] < alpha
+    de.genes <- is.sig(fData(eset), alpha, beta, sig.stat)
     de <- fData(eset)[de.genes, FC.COL]
     names(de) <- featureNames(eset)[de.genes]
     all <- featureNames(eset)
@@ -181,7 +186,7 @@ spia.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000, beta=1)
     else
     {     
         message("making SPIA data ...")
-        path.info <- make.spia.data(gs, grn)
+        path.info <- .make.spia.data(gs, grn)
         data.dir <- system.file("extdata/", package="SPIA")
         save(path.info, file=file.path(data.dir, "SPIA.RData"))
     }
@@ -197,7 +202,7 @@ spia.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000, beta=1)
 }
 
 # spia helper: create pathway data from gs and grn
-make.spia.data <- function(gs, grn)
+.make.spia.data <- function(gs, grn)
 {
     rel <- c("activation", "compound", "binding/association", 
             "expression", "inhibition", "activation_phosphorylation", 
@@ -222,7 +227,7 @@ make.spia.data <- function(gs, grn)
             actm2 <- m
             if(nrow(act.grn))
             {
-                if(nrow(act.grn) > 1) actm <- grn2adjm(act.grn)
+                if(nrow(act.grn) > 1) actm <- .grn2adjm(act.grn)
                 else actm <- matrix(1, nrow=1, ncol=1, dimnames=list(act.grn[1,1], act.grn[1,2]))
                 actm2[rownames(actm), colnames(actm)] <- actm
             }
@@ -230,7 +235,7 @@ make.spia.data <- function(gs, grn)
             inhm2 <- m
             if(nrow(inh.grn))
             {
-                if(nrow(inh.grn) > 1) inhm <- grn2adjm(inh.grn)
+                if(nrow(inh.grn) > 1) inhm <- .grn2adjm(inh.grn)
                 else inhm <-  matrix(1, nrow=1, ncol=1, dimnames=list(inh.grn[1,1], inh.grn[1,2]))
                 inhm2[rownames(inhm), colnames(inhm)] <- inhm
             }
@@ -256,18 +261,21 @@ make.spia.data <- function(gs, grn)
 #
 # Pathnet
 #
-pathnet.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000)
+.pathnet <- function(eset, gs, grn, alpha=0.05, perm=1000)
 {
+    PathNet <- NULL
+    .isAvailable("PathNet", type="software")
+    
     ADJP.COL <- config.ebrowser("ADJP.COL")
     GSP.COL <- config.ebrowser("GSP.COL")
 
     dir.evid <- -log(fData(eset)[,ADJP.COL], base=10)
     dir.evid <- cbind(as.integer(featureNames(eset)), dir.evid)
     colnames(dir.evid) <- c("Gene.ID", "Obs")
-    adjm <- grn2adjm(grn)
-    pwy.dat <- extr.pwy.dat(gs, grn)
+    adjm <- .grn2adjm(grn)
+    pwy.dat <- .extr.pwy.dat(gs, grn)
     
-    res <- PathNet::PathNet(
+    res <- PathNet(
             #Enrichment_Analysis = TRUE, 
             #Contextual_Analysis = FALSE, 
             DirectEvidence_info = dir.evid, 
@@ -289,7 +297,7 @@ pathnet.wrapper <- function(eset, gs, grn, alpha=0.05, perm=1000)
 }
 
 # pathnet helper: extract pathway data from gs and grn
-extr.pwy.dat <- function(gs, grn)
+.extr.pwy.dat <- function(gs, grn)
 {
     pwy.dat <- sapply(names(gs), 
         function(n)
@@ -317,7 +325,7 @@ extr.pwy.dat <- function(gs, grn)
 }
 
 # pathnet helper: converts 3-col grn to adjacency matrix
-grn2adjm <- function(grn)
+.grn2adjm <- function(grn)
 {
     nodes <- sort(unique(as.vector(grn[,1:2])))
     adjm <- sapply(nodes, 
@@ -335,3 +343,4 @@ grn2adjm <- function(grn)
     rownames(adjm) <- nodes
     return(adjm)
 }
+

@@ -7,9 +7,10 @@
 #
 ############################################################
 
-# A INPUT FASSADE - wrapping & delegation
-sbea.methods <- function() c("ora", "safe", "gsea", "samgs", "ebm")
+sbea.methods <- function() 
+    c("ora", "safe", "gsea", "samgs", "ebm")
 
+# INPUT FASSADE - wrapping & delegation
 sbea <- function(   
     method=sbea.methods(), 
     eset, 
@@ -18,7 +19,7 @@ sbea <- function(
     perm=1000, 
     padj.method="none",
     out.file=NULL,
-    browse=FALSE)
+    browse=FALSE, ...)
 {   
     # get configuration
     GS.MIN.SIZE <- config.ebrowser("GS.MIN.SIZE")
@@ -48,36 +49,52 @@ sbea <- function(
         method <- match.arg(method)
         data.type <- experimentData(eset)@other$dataType
         if(is.null(data.type)) data.type <- auto.detect.data.type(exprs(eset))
- 
-        # gsea
-        if(data.type != "rseq" & method == "gsea") gs.ps <- gsea(eset, gs, perm)
-        else
+
+        # rseq? 
+        if(data.type == "rseq")
         {
-            cmat <- gmt.2.cmat(gs, featureNames(eset), GS.MIN.SIZE, GS.MAX.SIZE)
+            # gs2cmat
+            cmat <- .gmt2cmat(gs, featureNames(eset), GS.MIN.SIZE, GS.MAX.SIZE)
             if(nrow(cmat) < nrow(eset)) eset <- eset[rownames(cmat),] 
-           
-            # hypergeom. ora
-            if(method == "ora" & perm==0) gs.ps <- ora(1, eset, cmat, perm, alpha)
+
+            # ora
+            if(method == "ora" & perm==0) 
+                gs.ps <- .ora(1, eset, cmat, perm, alpha, ...)
             # ebm
-            else if(method == "ebm") gs.ps <- ebm(eset, cmat)
-            # rseq 
-            else if(data.type == "rseq") gs.ps <- rseq.sbea(method, eset, cmat, perm, alpha)
-            # resampl ora
-            else if(method == "ora") gs.ps <- ora(1, eset, cmat, perm, alpha)
-            #safe
-            else if(method == "safe") gs.ps <- ora(2, eset, cmat, perm, alpha)
-            # samgs
-            else if(method == "samgs")
+            else if(method == "ebm") gs.ps <- .ebm(eset, cmat)
+            # all others
+            else gs.ps <- rseq.sbea(method, eset, cmat, perm, alpha)
+        }
+        # microarray
+        else
+        { 
+            # gsea
+            if(method == "gsea") gs.ps <- .gsea(eset, gs, perm)
+            else
             {
-                if(is.null(out.file)) out.dir <- config.ebrowser("OUTDIR.DEFAULT")
-                else out.dir <- sub("\\.[a-z]+$","_files", out.file)
-                if(!file.exists(out.dir)) dir.create(out.dir)
-                samt.file <- file.path(out.dir, "samt.RData")
-                GRP.COL <- config.ebrowser("GRP.COL")
-                gs.ps <- SAMGS(GS=as.data.frame(cmat), DATA=exprs(eset), 
+                # gs2cmat
+                cmat <- .gmt2cmat(gs, featureNames(eset), GS.MIN.SIZE, GS.MAX.SIZE)
+                if(nrow(cmat) < nrow(eset)) eset <- eset[rownames(cmat),] 
+            
+                # ora
+                if(method == "ora") gs.ps <- .ora(1, eset, cmat, perm, alpha, ...)
+                #safe
+                else if(method == "safe") gs.ps <- .ora(2, eset, cmat, perm, alpha)
+                # ebm
+                else if(method == "ebm") gs.ps <- .ebm(eset, cmat)
+                # samgs
+                else if(method == "samgs")
+                {
+                    if(is.null(out.file)) out.dir <- config.ebrowser("OUTDIR.DEFAULT")
+                    else out.dir <- sub("\\.[a-z]+$","_files", out.file)
+                    if(!file.exists(out.dir)) dir.create(out.dir)
+                    samt.file <- file.path(out.dir, "samt.RData")
+                    GRP.COL <- config.ebrowser("GRP.COL")
+                    gs.ps <- SAMGS(GS=as.data.frame(cmat), DATA=exprs(eset), 
                         cl=as.factor(as.integer(eset[[GRP.COL]]) + 1), 
                         nbPermutations=perm, 
                         tstat.file=samt.file)
+                }
             }
         }
     }
@@ -127,8 +144,12 @@ gs.ranking <- function(res, signif.only=TRUE)
     return(ranking)
 }
 
-# 0 HELPER
-gmt.2.cmat <- function(gs, features, min.size=0, max.size=Inf)
+###
+#
+# HELPER
+# 
+###
+.gmt2cmat <- function(gs, features, min.size=0, max.size=Inf)
 {
     if(is.character(gs)) gs <- parse.genesets.from.GMT(gs)
     # transform gs gmt to cmat
@@ -148,22 +169,6 @@ gmt.2.cmat <- function(gs, features, min.size=0, max.size=Inf)
     return(cmat)
 }
 
-###
-#
-# ENRICHMENT METHODS
-#
-###
-
-# ebm: _e_mpirical _b_rowns _m_ethod
-ebm <- function(eset, cmat)
-{
-    pcol <-  fData(eset)[, config.ebrowser("ADJP.COL")]
-    e <- exprs(eset)
-    gs.ps <- apply(cmat, 2, function(s) 
-        EmpiricalBrownsMethod::empiricalBrownsMethod(e[s,], pcol[s]))
-    return(gs.ps)
-}
-
 # de.ana as local.stat for safe
 local.de.ana <- function (X.mat, y.vec, args.local)
 {
@@ -177,6 +182,12 @@ local.de.ana <- function (X.mat, y.vec, args.local)
     })
 }
 
+
+###
+#
+# ENRICHMENT METHODS
+#
+###
 
 rseq.sbea <- function(method, eset, cmat, perm, alpha)
 {
@@ -195,14 +206,15 @@ rseq.sbea <- function(method, eset, cmat, perm, alpha)
     {
         global <- "Fisher"
         nr.sigs <- sum(fData(eset)[, config.ebrowser("ADJP.COL")] < alpha)
-        args.global <- list(one.sided=FALSE, genelist.length=nr.sigs)
+        args.global$genelist.length <- nr.sigs
     }
     else if(method == "safe") global <- "Wilcoxon" 
     else if(method == "gsea") global <- "Kolmogorov"
     else if(method == "samgs")
     {
-        global <- "SAMGS"
-        assign("global.SAMGS", global.SAMGS, envir=.GlobalEnv)
+        global <- toupper(method)
+        global.func <- paste("global", global, sep=".")
+        assign(global.func, get(global.func), envir=.GlobalEnv)
     }
 
     y <- pData(eset)[,config.ebrowser("GRP.COL")]
@@ -221,16 +233,30 @@ rseq.sbea <- function(method, eset, cmat, perm, alpha)
     return(res.tbl)
 }
 
+is.sig <- function(fdat, alpha=0.05, beta=1, sig.stat=c("p", "fc", "|", "&"))
+{
+    sig.stat <- match.arg(sig.stat)
+    if(sig.stat == "p") sig <- fdat[, config.ebrowser("ADJP.COL")] < alpha
+    else if(sig.stat == "fc") sig <- abs(fdat[, config.ebrowser("FC.COL")]) > beta
+    else 
+    {
+        psig <- fdat[, config.ebrowser("ADJP.COL")] < alpha
+        fcsig <- abs(fdat[, config.ebrowser("FC.COL")]) > beta
+        sig <- do.call(sig.stat, list(psig, fcsig))
+    }
+    return(sig)
+}
+
 # 1 HYPERGEOM ORA
-ora.hyperg <- function(ps, cmat, alpha=0.05)
+ora.hyperg <- function(fdat, cmat, alpha=0.05, beta=1, sig.stat=c("p", "fc", "|", "&"))
 {
     # determine sig. diff. exp. genes of eset, 
     # corresponds to sample size from urn
-    is.sig <- ps < alpha
-    nr.sigs <- sum(is.sig)
+    isig <- is.sig(fdat, alpha, beta, sig.stat)
+    nr.sigs <- sum(isig)
     
     # determine overlap of sig and set genes for each set
-    sig.cmat <- cmat & is.sig
+    sig.cmat <- cmat & isig
 
     # white balls observed when drawing nr.sigs balls from the urn
     ovlp.sizes <- colSums(sig.cmat)
@@ -238,7 +264,7 @@ ora.hyperg <- function(ps, cmat, alpha=0.05)
     # white balls in the urn  (genes in gene set)
     gs.sizes <- colSums(cmat) 
     # black balls in the urn (genes not in gene set)
-    uni.sizes <- length(ps) - gs.sizes 
+    uni.sizes <- nrow(fdat) - gs.sizes 
 
     # determine significance of overlap 
     # based on hypergeom. distribution
@@ -264,7 +290,7 @@ ora.hyperg <- function(ps, cmat, alpha=0.05)
 #   mode=2 ... safe default (wilcoxon)
 #
 #
-ora <- function(mode=2, eset, cmat, perm=1000, alpha=0.05)
+.ora <- function(mode=2, eset, cmat, perm=1000, alpha=0.05, beta=1, sig.stat=c("p", "fc", "|", "&"))
 {
     GRP.COL <- config.ebrowser("GRP.COL")
     ADJP.COL <- config.ebrowser("ADJP.COL")
@@ -273,13 +299,13 @@ ora <- function(mode=2, eset, cmat, perm=1000, alpha=0.05)
     y <- pData(eset)[, GRP.COL]
 
     # execute hypergeom ORA if no permutations
-    ps <- fData(eset)[, ADJP.COL]
-    if(perm == 0) res.tbl <- ora.hyperg(ps=ps, cmat=cmat, alpha=alpha)
+    fdat <- fData(eset)
+    if(perm == 0) res.tbl <- ora.hyperg(fdat, cmat, alpha, beta, sig.stat)
     # else do resampling using functionality of SAFE
     else{
         # resampl ORA
         if(mode == 1){
-            nr.sigs <- sum(fData(eset)[ , ADJP.COL] < alpha)
+            nr.sigs <- sum(is.sig(fdat, alpha, beta, sig.stat))
             args <- list(one.sided=FALSE, genelist.length=nr.sigs)
 
             gs.ps <- safe::safe(X.mat=x, y.vec=y, global="Fisher", C.mat=cmat, 
@@ -298,7 +324,7 @@ ora <- function(mode=2, eset, cmat, perm=1000, alpha=0.05)
 }
 
 # 4 GSEA
-gsea <- function(
+.gsea <- function(
     eset, 
     gs.gmt, 
     perm=1000, 
@@ -309,9 +335,11 @@ gsea <- function(
     # npGSEA
     if(perm==0)
     {
+        npGSEA <- pTwoSided <- NULL
+        .isAvailable("npGSEA", type="software")
         gsc <- gs.list.2.gs.coll(gs.gmt)
-        res <- npGSEA::npGSEA(x=exprs(eset), y=eset[[GRP.COL]], set=gsc)
-        ps <- sapply(res, npGSEA::pTwoSided)
+        res <- npGSEA(x=exprs(eset), y=eset[[GRP.COL]], set=gsc)
+        ps <- sapply(res, pTwoSided)
         names(ps) <- names(gs.gmt)
         return(ps)
     }
@@ -336,5 +364,14 @@ gsea <- function(
     return(gs.ps)
 }
 
-
+# 5 EBM (_E_mpirical _B_rowns _M_ethod)
+.ebm <- function(eset, cmat)
+{
+    empiricalBrownsMethod <- NULL
+    .isAvailable("EmpiricalBrownsMethod", type="software")
+    pcol <-  fData(eset)[, config.ebrowser("ADJP.COL")]
+    e <- exprs(eset)
+    gs.ps <- apply(cmat, 2, function(s) empiricalBrownsMethod(e[s,], pcol[s]))
+    return(gs.ps)
+}
 
