@@ -457,6 +457,19 @@ make.ggraph.html <- function(eset, sgrn, alpha, img.file)
     if(nrow(sgrn) > 0)
         sggea.graph <- construct.ggea.graph(grn=sgrn, eset=eset, alpha=alpha)
     
+    # txt report
+    report.file <- sub("png$", "txt", img.file)
+    if(!is.null(sggea.graph))
+    {
+            consistency <- sggea.graph@renderInfo@edges$label
+            cons.tbl <- cbind(names(consistency), consistency)
+            cons.tbl <- cons.tbl[order(as.numeric(consistency), decreasing=TRUE),]
+            colnames(cons.tbl) <- c("EDGE", "CONSISTENCY")
+            write.table(cons.tbl,
+                file=report.file, row.names=FALSE, quote=FALSE, sep="\t")
+    }
+    else cat("No edges in network for this set!", file=report.file)
+
     # ggea graph png
     png(img.file, width=width, height=height)
     par(mai=rep(0,4))
