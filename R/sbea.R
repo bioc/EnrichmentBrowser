@@ -8,8 +8,9 @@
 ############################################################
 
 sbea.methods <- function() 
-    c("ora", "safe", "gsea", "samgs", "ebm", "mgsa", 
-        "gsa", "padog", "globaltest", "roast", "camera", "gsva")
+    c("ora", "safe", "gsea", "padog",
+		"roast", "camera", "gsa", "gsva",
+		"globaltest", "samgs", "ebm", "mgsa")
 
 # INPUT FASSADE - wrapping & delegation
 sbea <- function(   
