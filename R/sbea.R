@@ -230,6 +230,7 @@ local.de.ana <- function (X.mat, y.vec, args.local)
 
 rseq.sbea <- function(method, eset, cmat, perm, alpha)
 {
+    assign("eset", eset, envir=.GlobalEnv)
     assign("local.de.ana", local.de.ana, envir=.GlobalEnv)
     de.method <- grep(".STAT$", colnames(fData(eset)), value=TRUE)
     de.method <- sub(".STAT$",  "", de.method)
@@ -258,12 +259,12 @@ rseq.sbea <- function(method, eset, cmat, perm, alpha)
         if(method == "padog") args.global$gf <- get.gene.freq.weights(cmat)
     }
 
+	x <- exprs(eset)
     y <- pData(eset)[,config.ebrowser("GRP.COL")]
-    gs.ps <- safe::safe(X.mat=exprs(eset), y.vec=y, C.mat=cmat,         
+    gs.ps <- safe::safe(X.mat=x, y.vec=y, C.mat=cmat,         
         local="de.ana", args.local=args.local,
         global=global, args.global=args.global, 
         Pi.mat=perm, alpha=alpha, error="none")
- 
     res.tbl <- cbind(
             gs.ps@global.stat, 
             gs.ps@global.stat / colSums(cmat), 
