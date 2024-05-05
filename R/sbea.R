@@ -938,12 +938,13 @@ global.PADOG <- function(cmat, u, args.global)
 # 11 GSVA
 .gsva <- function(se, gs, rseq=FALSE)
 {
-    gsva <- NULL
+    gsva <- gsvaParam <- NULL
     isAvailable("GSVA", type="software")
   
     # compute GSVA per sample enrichment scores
     kcdf <- ifelse(rseq, "Poisson", "Gaussian")
-    es <- gsva(expr=assay(se), gset.idx.list=gs, kcdf=kcdf)
+    gp <- gsvaParam(exprData=assay(se), geneSets=gs, kcdf=kcdf)
+    es <- gsva(gp)
   
     # set design matrix
     grp <- colData(se)[, configEBrowser("GRP.COL")]
